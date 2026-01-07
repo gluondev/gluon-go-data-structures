@@ -71,3 +71,11 @@ While the Go standard library is excellent, it is intentionally minimalist. This
 ```bash
 go get [github.com/gluondev/gluon-go-data-structures](https://github.com/gluondev/gluon-go-data-structures)
 ```
+
+### Build a Demo Binary
+This repo is primarily a library, so packages like `./linear` won't produce a standalone binary by themselves. A small demo `main` package is available under `./cmd`.
+
+```bash
+go build -o ringbuffer-demo ./cmd/ringbuffer-demo
+./ringbuffer-demo -capacity 3
+```
