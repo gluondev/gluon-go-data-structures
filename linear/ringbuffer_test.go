@@ -1,118 +1,172 @@
 package linear
 
 import (
-	"errors"
+	"fmt"
 	"testing"
 )
 
-func TestRingBuffer(t *testing.T) {
-	t.Run("Initialization", func(t *testing.T) {
-		capacity := 5
-		rb := NewRingBuffer[int](capacity)
+func TestRingBuffer_Basic(t *testing.T) {
+	buf := NewRingBuffer[int](3)
 
-		if rb.Len() != 0 {
-			t.Errorf("Expected initial length 0, got %d", rb.Len())
-		}
-		if !rb.IsEmpty() {
-			t.Error("New buffer should be empty")
-		}
-		if rb.IsFull() {
-			t.Error("New buffer should not be full")
-		}
-	})
+	if got := buf.Cap(); got != 3 {
+		t.Fatalf("Cap() = %d, want 3", got)
+	}
+	if !buf.IsEmpty() {
+		t.Fatalf("expected empty buffer")
+	}
 
-	t.Run("EnqueueAndDequeue", func(t *testing.T) {
-		rb := NewRingBuffer[int](3)
+	if err := buf.Enqueue(1); err != nil {
+		t.Fatalf("Enqueue(1): %v", err)
+	}
+	if err := buf.Enqueue(2); err != nil {
+		t.Fatalf("Enqueue(2): %v", err)
+	}
+	if err := buf.Enqueue(3); err != nil {
+		t.Fatalf("Enqueue(3): %v", err)
+	}
+	if !buf.IsFull() {
+		t.Fatalf("expected full buffer")
+	}
+	if err := buf.Enqueue(4); err != ErrBufferFull {
+		t.Fatalf("Enqueue(4) error = %v, want %v", err, ErrBufferFull)
+	}
 
-		// Basic Enqueue
-		rb.Enqueue(1)
-		rb.Enqueue(2)
+	if got, err := buf.Peek(); err != nil || got != 1 {
+		t.Fatalf("Peek() = (%v, %v), want (1, nil)", got, err)
+	}
 
-		if rb.Len() != 2 {
-			t.Errorf("Expected length 2, got %d", rb.Len())
-		}
+	v, err := buf.Dequeue()
+	if err != nil || v != 1 {
+		t.Fatalf("Dequeue() = (%v, %v), want (1, nil)", v, err)
+	}
+	v, err = buf.Dequeue()
+	if err != nil || v != 2 {
+		t.Fatalf("Dequeue() = (%v, %v), want (2, nil)", v, err)
+	}
 
-		// Basic Dequeue
-		val, err := rb.Dequeue()
-		if err != nil {
-			t.Errorf("Unexpected error on dequeue: %v", err)
-		}
-		if val != 1 {
-			t.Errorf("Expected 1, got %d", val)
-		}
-		if rb.Len() != 1 {
-			t.Errorf("Expected length 1, got %d", rb.Len())
-		}
-	})
+	if err := buf.Enqueue(4); err != nil {
+		t.Fatalf("Enqueue(4): %v", err)
+	}
+	if err := buf.Enqueue(5); err != nil {
+		t.Fatalf("Enqueue(5): %v", err)
+	}
 
-	t.Run("FullAndEmptyErrors", func(t *testing.T) {
-		rb := NewRingBuffer[int](2)
+	v, err = buf.Dequeue()
+	if err != nil || v != 3 {
+		t.Fatalf("Dequeue() = (%v, %v), want (3, nil)", v, err)
+	}
+	v, err = buf.Dequeue()
+	if err != nil || v != 4 {
+		t.Fatalf("Dequeue() = (%v, %v), want (4, nil)", v, err)
+	}
+	v, err = buf.Dequeue()
+	if err != nil || v != 5 {
+		t.Fatalf("Dequeue() = (%v, %v), want (5, nil)", v, err)
+	}
 
-		// Test Empty Dequeue
-		_, err := rb.Dequeue()
-		if !errors.Is(err, ErrBufferEmpty) {
-			t.Errorf("Expected ErrBufferEmpty, got %v", err)
-		}
+	if _, err := buf.Dequeue(); err != ErrBufferEmpty {
+		t.Fatalf("Dequeue() error = %v, want %v", err, ErrBufferEmpty)
+	}
+}
 
-		// Fill the buffer
-		rb.Enqueue(10)
-		rb.Enqueue(20)
+func TestRingBuffer_Try(t *testing.T) {
+	buf := NewRingBuffer[int](2)
 
-		if !rb.IsFull() {
-			t.Error("Buffer should be full now")
-		}
+	if got := buf.TryEnqueue(1); !got {
+		t.Fatalf("TryEnqueue(1) = false, want true")
+	}
+	if got := buf.TryEnqueue(2); !got {
+		t.Fatalf("TryEnqueue(2) = false, want true")
+	}
+	if got := buf.TryEnqueue(3); got {
+		t.Fatalf("TryEnqueue(3) = true, want false")
+	}
 
-		// Test Full Enqueue
-		err = rb.Enqueue(30)
-		if !errors.Is(err, ErrBufferFull) {
-			t.Errorf("Expected ErrBufferFull, got %v", err)
-		}
-	})
+	v, ok := buf.TryDequeue()
+	if !ok || v != 1 {
+		t.Fatalf("TryDequeue() = (%v, %v), want (1, true)", v, ok)
+	}
+	v, ok = buf.TryDequeue()
+	if !ok || v != 2 {
+		t.Fatalf("TryDequeue() = (%v, %v), want (2, true)", v, ok)
+	}
+	_, ok = buf.TryDequeue()
+	if ok {
+		t.Fatalf("TryDequeue() ok = true, want false")
+	}
+}
 
-	t.Run("WrapAroundLogic", func(t *testing.T) {
-		// This is the most critical test for a circular buffer
-		rb := NewRingBuffer[int](3)
+func TestRingBuffer_EnqueueOverwrite(t *testing.T) {
+	buf := NewRingBuffer[int](3)
+	_ = buf.Enqueue(1)
+	_ = buf.Enqueue(2)
+	_ = buf.Enqueue(3)
 
-		// Fill and empty partially to move head/tail
-		rb.Enqueue(1) // [1, _, _]
-		rb.Enqueue(2) // [1, 2, _]
-		rb.Dequeue()  // [_, 2, _] head is at index 1
+	buf.EnqueueOverwrite(4)
 
-		rb.Enqueue(3) // [_, 2, 3]
-		rb.Enqueue(4) // [4, 2, 3] tail wraps to index 0
+	v, _ := buf.Dequeue()
+	if v != 2 {
+		t.Fatalf("Dequeue() = %d, want 2", v)
+	}
+	v, _ = buf.Dequeue()
+	if v != 3 {
+		t.Fatalf("Dequeue() = %d, want 3", v)
+	}
+	v, _ = buf.Dequeue()
+	if v != 4 {
+		t.Fatalf("Dequeue() = %d, want 4", v)
+	}
+}
 
-		if !rb.IsFull() {
-			t.Error("Buffer should be full after wrap-around enqueue")
-		}
+func TestRingBuffer_ClearAndReset(t *testing.T) {
+	buf := NewRingBuffer[int](2)
+	_ = buf.Enqueue(1)
+	_ = buf.Enqueue(2)
 
-		// Dequeue all and check order
-		results := []int{}
-		for !rb.IsEmpty() {
-			v, _ := rb.Dequeue()
-			results = append(results, v)
-		}
+	buf.Reset()
+	if !buf.IsEmpty() || buf.Len() != 0 {
+		t.Fatalf("after Reset expected empty buffer, got Len=%d", buf.Len())
+	}
 
-		expected := []int{2, 3, 4}
-		for i, v := range results {
-			if v != expected[i] {
-				t.Errorf("At index %d: expected %d, got %d", i, expected[i], v)
+	_ = buf.Enqueue(3)
+	buf.Clear()
+	if !buf.IsEmpty() || buf.Len() != 0 {
+		t.Fatalf("after Clear expected empty buffer, got Len=%d", buf.Len())
+	}
+}
+
+func TestNewRingBuffer_InvalidCapacityPanics(t *testing.T) {
+	t.Run("zero", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatalf("expected panic for capacity 0")
 			}
-		}
+		}()
+		_ = NewRingBuffer[int](0)
 	})
-
-	t.Run("GenericsSupport", func(t *testing.T) {
-		type custom struct {
-			ID   int
-			Name string
-		}
-		rb := NewRingBuffer[custom](1)
-		
-		val := custom{ID: 1, Name: "Gluon"}
-		rb.Enqueue(val)
-		
-		out, _ := rb.Dequeue()
-		if out.Name != "Gluon" {
-			t.Errorf("Generics failed, expected 'Gluon', got %s", out.Name)
-		}
+	t.Run("negative", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatalf("expected panic for negative capacity")
+			}
+		}()
+		_ = NewRingBuffer[int](-1)
 	})
 }
+
+func ExampleRingBuffer() {
+	buf := NewRingBuffer[string](2)
+	buf.EnqueueOverwrite("a")
+	buf.EnqueueOverwrite("b")
+	buf.EnqueueOverwrite("c") // overwrites "a"
+
+	for !buf.IsEmpty() {
+		v, _ := buf.Dequeue()
+		fmt.Println(v)
+	}
+
+	// Output:
+	// b
+	// c
+}
+
